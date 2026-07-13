@@ -1,7 +1,7 @@
 ---
 name: suggest
 description: Generate AI-curated design tweak suggestions (palette / typography variants) for a Frameground project. Drops three named variants into the project's suggestions drawer where the user can preview and apply them with one click.
-argument-hint: [project] [tweak] [optional prompt] [--source name]
+argument-hint: "[project] [tweak] [optional prompt] [--source name]"
 allowed-tools: Read Write Edit Bash(curl *) Bash(ls *) Bash(date *) Glob
 ---
 

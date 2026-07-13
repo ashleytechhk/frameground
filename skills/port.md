@@ -1,7 +1,7 @@
 ---
 name: port
 description: Port an existing app's screens into a Frameground project as one frame per screen so they can be redesigned. Use when the user wants to bring an existing codebase into Frameground.
-argument-hint: [source-path] [project-name] [--redesign] [--append]
+argument-hint: "[source-path] [project-name] [--redesign] [--append]"
 allowed-tools: Read Write Edit Bash(curl *) Bash(ls *) Glob Agent
 ---
 
