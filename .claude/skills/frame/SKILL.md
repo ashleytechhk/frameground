@@ -1,7 +1,7 @@
 ---
 name: frame
 description: Create or update an HTML frame on the Frameground canvas. Use when the user asks to create a screen, page, component, or frame for their app.
-argument-hint: [project] [description of what the frame should show] [--no-suggest]
+argument-hint: "[project] [description of what the frame should show] [--no-suggest]"
 allowed-tools: Read Write Edit Bash(curl *) Bash(ls *) Bash(node ./node_modules/@google/design.md/*) Bash(date *) Skill Glob
 ---
 

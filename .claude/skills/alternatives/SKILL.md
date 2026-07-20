@@ -1,7 +1,7 @@
 ---
 name: alternatives
 description: Generate N alternative designs of a frame so the user can compare them side by side on the canvas. Use when the user wants options for a screen before committing.
-argument-hint: [project] [existing-frame-id | fresh description] [--wild] [--count N]
+argument-hint: "[project] [existing-frame-id | fresh description] [--wild] [--count N]"
 allowed-tools: Read Write Edit Bash(curl *) Bash(ls *) Glob Agent
 ---
 
