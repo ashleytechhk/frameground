@@ -4,6 +4,7 @@ import { HTML_FRAME_TYPE } from '../shapes/HtmlFrameShape'
 import { getLayout, getManifest } from '../lib/api'
 import { DEFAULT_LAYOUT, type FrameEntry, type Layout } from '../lib/manifest'
 import { useProjectEvent } from '../lib/projectEvents'
+import { shouldReloadFrameForFile } from '../lib/frameReload'
 
 type SetNodes = React.Dispatch<React.SetStateAction<Node[]>>
 
@@ -60,10 +61,10 @@ export function useFrameSync(projectId: string, setNodes: SetNodes) {
     }))
   }, [projectId, setNodes])
 
-  const bumpFileVersion = useCallback((frameId: string) => {
+  const bumpFileVersion = useCallback((file: string) => {
     setNodes(current => current.map(n => {
-      if (n.id !== frameId) return n
-      const data = n.data as { url?: string }
+      const data = n.data as { file?: string; url?: string }
+      if (!data.file || !shouldReloadFrameForFile(data.file, file)) return n
       const url = data.url ?? ''
       const base = url.split('?')[0]
       return { ...n, data: { ...n.data, url: `${base}?v=${Date.now()}` } }
@@ -90,8 +91,8 @@ export function useFrameSync(projectId: string, setNodes: SetNodes) {
   useProjectEvent('layout-changed', () => { reconcileLayout() })
   useProjectEvent('file-changed', (e) => {
     try {
-      const data = JSON.parse(e.data) as { frameId?: string }
-      if (data.frameId) bumpFileVersion(data.frameId)
+      const data = JSON.parse(e.data) as { file?: string }
+      if (data.file) bumpFileVersion(data.file)
     } catch { /* ignore */ }
   })
 

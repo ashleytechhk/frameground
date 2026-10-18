@@ -11,6 +11,11 @@ type Channel = {
 const channels = new Map<string, Channel>()
 const DEBOUNCE_MS = 80
 
+/** Convert an absolute chokidar path into the URL/manifest-style project path. */
+export function projectRelativeFile(projectPath: string, changedPath: string): string {
+  return path.relative(projectPath, changedPath).split(path.sep).join('/')
+}
+
 function broadcast(projectId: string, event: string, data: unknown): void {
   const ch = channels.get(projectId)
   if (!ch) return
@@ -49,21 +54,32 @@ function ensureChannel(projectId: string): Channel {
 
   const emitManifest = debounce(() => broadcast(projectId, 'manifest-changed', {}), DEBOUNCE_MS)
   const emitLayout = debounce(() => broadcast(projectId, 'layout-changed', {}), DEBOUNCE_MS)
-  const emitFile = debounce((frameId: string) => broadcast(projectId, 'file-changed', { frameId }), DEBOUNCE_MS)
+  const fileTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const emitFile = (file: string) => {
+    const previous = fileTimers.get(file)
+    if (previous) clearTimeout(previous)
+    fileTimers.set(file, setTimeout(() => {
+      fileTimers.delete(file)
+      broadcast(projectId, 'file-changed', { file })
+    }, DEBOUNCE_MS))
+  }
   const emitDesign = debounce(() => broadcast(projectId, 'design-changed', {}), DEBOUNCE_MS)
   const emitSuggestions = debounce(() => broadcast(projectId, 'suggestions-changed', {}), DEBOUNCE_MS)
   const emitSettings = debounce(() => broadcast(projectId, 'settings-changed', {}), DEBOUNCE_MS)
 
-  const suggestionsPrefix = path.join('.opendesign', 'suggestions') + path.sep
+  const layoutFile = '.opendesign/layout.json'
+  const settingsFile = '.opendesign/settings.json'
+  const suggestionsPrefix = '.opendesign/suggestions/'
 
   const onChange = (p: string) => {
-    const rel = path.relative(dir, p)
+    const rel = projectRelativeFile(dir, p)
     if (rel === 'frames.json') emitManifest()
-    else if (rel === path.join('.opendesign', 'layout.json')) emitLayout()
-    else if (rel === path.join('.opendesign', 'settings.json')) emitSettings()
+    else if (rel === layoutFile) emitLayout()
+    else if (rel === settingsFile) emitSettings()
     else if (rel === 'DESIGN.md' || rel === 'FEEL.md') emitDesign()
     else if (rel.startsWith(suggestionsPrefix) && rel.endsWith('.json')) emitSuggestions()
-    else if (rel.endsWith('.html')) emitFile(path.basename(rel, '.html'))
+    else if (rel.startsWith('.opendesign/')) { /* canvas metadata is not frame content */ }
+    else emitFile(rel)
   }
 
   watcher.on('add', onChange)
