@@ -23,7 +23,10 @@ const DEFAULT_GLOBAL: GlobalSettings = {
   canvas: { snap: true, snapPx: 6, fitDurationMs: 400 },
 }
 
-const DEFAULT_PROJECT: ProjectSettings = { version: 1 }
+const DEFAULT_PROJECT: ProjectSettings = {
+  version: 1,
+  canvas: { backgroundColor: '#252525' },
+}
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v)

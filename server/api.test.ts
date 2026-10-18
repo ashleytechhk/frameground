@@ -566,7 +566,7 @@ describe('project settings', () => {
   test('GET returns defaults for valid project', async () => {
     const res = await fetch(`${baseUrl}/api/projects/demo/settings`)
     expect(res.status).toBe(200)
-    expect(await getJson(res)).toEqual({ version: 1 })
+    expect(await getJson(res)).toEqual({ version: 1, canvas: { backgroundColor: '#252525' } })
   })
 
   test('GET 404s on missing project', async () => {
@@ -613,7 +613,7 @@ describe('project settings', () => {
       body: JSON.stringify({ canvas: { snapPx: 22 } }),
     })
     const projectBody = await getJson(await fetch(`${baseUrl}/api/projects/demo/settings`))
-    expect(projectBody).toEqual({ version: 1 })
+    expect(projectBody).toEqual({ version: 1, canvas: { backgroundColor: '#252525' } })
     expect(fs.existsSync(path.join(tmp, 'demo', '.opendesign', 'settings.json'))).toBe(false)
   })
 })

@@ -143,6 +143,7 @@ function CanvasInner({ projectId }: { projectId: string }) {
 
   const settings = useSettings(projectId)
   const { snap: snapEnabled, snapPx, fitDurationMs } = settings.global.canvas
+  const canvasBackgroundColor = normalizeCanvasBackgroundColor(settings.project.canvas.backgroundColor)
 
   const overridesCss = useMemo(() => buildOverridesCss(overrides), [overrides])
   const tokensSyncValue = useMemo(() => ({ tokensCss, overridesCss }), [tokensCss, overridesCss])
@@ -386,7 +387,7 @@ function CanvasInner({ projectId }: { projectId: string }) {
           fitView
           minZoom={0.1}
           maxZoom={4}
-          style={{ cursor: canvasMode === 'pan' ? 'grab' : 'default' }}
+          style={{ cursor: canvasMode === 'pan' ? 'grab' : 'default', background: canvasBackgroundColor }}
           onNodeDoubleClick={(_, node) => {
             setNodes(nds => nds.map(n =>
               n.id === node.id ? { ...n, data: { ...n.data, editMode: true } } : n
@@ -401,7 +402,7 @@ function CanvasInner({ projectId }: { projectId: string }) {
             }))
           }}
         >
-          <Background />
+          <Background color={backgroundPatternColor(canvasBackgroundColor)} />
           <Controls position="bottom-left">
             <ControlButton
               onClick={() => changeCanvasMode('pan')}
@@ -427,11 +428,13 @@ function CanvasInner({ projectId }: { projectId: string }) {
         <TokensPanel
           projectId={projectId}
           design={design}
+          canvasBackgroundColor={canvasBackgroundColor}
           overrides={overrides}
           suggestions={suggestions}
           onSetOverride={setOverride}
           onApplyVariant={applyVariant}
           onDismissSuggestion={handleDismissSuggestion}
+          onCanvasBackgroundColorChange={color => settings.patchProject({ canvas: { backgroundColor: color } })}
           onReset={resetOverrides}
           onClose={() => setPanelOpen(false)}
         />
@@ -456,6 +459,16 @@ function CanvasInner({ projectId }: { projectId: string }) {
     </div>
     </TokensSyncContext.Provider>
   )
+}
+
+function normalizeCanvasBackgroundColor(color: string | undefined): string {
+  return /^#[0-9a-fA-F]{6}$/.test(color ?? '') ? color! : '#252525'
+}
+
+function backgroundPatternColor(background: string): string {
+  const value = Number.parseInt(background.slice(1), 16)
+  const luminance = (0.2126 * ((value >> 16) & 0xff) + 0.7152 * ((value >> 8) & 0xff) + 0.0722 * (value & 0xff)) / 255
+  return luminance < 0.45 ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)'
 }
 
 const toolbarBtnStyle: React.CSSProperties = {

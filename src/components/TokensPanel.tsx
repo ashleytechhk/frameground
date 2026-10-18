@@ -10,11 +10,13 @@ const UNITLESS_NUM_RE = /^-?\d*\.?\d+$/
 interface Props {
   projectId: string
   design: ProjectDesign | null
+  canvasBackgroundColor: string
   overrides: Map<string, string>
   suggestions: Suggestion[]
   onSetOverride: (path: string[], value: string | null) => void
   onApplyVariant: (tokens: Record<string, unknown>) => void
   onDismissSuggestion: (id: string) => void
+  onCanvasBackgroundColorChange: (value: string) => void
   onReset: () => void
   onClose: () => void
 }
@@ -27,11 +29,13 @@ interface Leaf {
 export function TokensPanel({
   projectId,
   design,
+  canvasBackgroundColor,
   overrides,
   suggestions,
   onSetOverride,
   onApplyVariant,
   onDismissSuggestion,
+  onCanvasBackgroundColorChange,
   onReset,
   onClose,
 }: Props) {
@@ -75,6 +79,23 @@ export function TokensPanel({
         {design?.parseError && (
           <div style={errorBoxStyle}>parse error: {design.parseError}</div>
         )}
+        <section style={sectionStyle}>
+          <h3 style={sectionTitleStyle}>Canvas</h3>
+          <div style={rowStyle(false)}>
+            <label style={rowLabelStyle} htmlFor="canvas-background-color">Background</label>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flex: 1 }}>
+              <input
+                id="canvas-background-color"
+                type="color"
+                value={normalizeHex6(canvasBackgroundColor)}
+                onChange={e => onCanvasBackgroundColorChange(e.target.value)}
+                style={swatchStyle}
+              />
+              <code style={codeStyle}>{canvasBackgroundColor.toUpperCase()}</code>
+            </div>
+          </div>
+          <div style={{ ...emptyHintStyle, padding: '4px 0 0' }}>Saved with this project. It does not change HTML design tokens.</div>
+        </section>
         <section style={sectionStyle}>
           <h3 style={sectionTitleStyle}>Suggestions</h3>
           {suggestions.length === 0 ? (

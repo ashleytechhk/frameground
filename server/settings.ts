@@ -24,6 +24,9 @@ export interface GlobalSettings {
 
 export interface ProjectSettings {
   version: number
+  canvas: {
+    backgroundColor: string
+  }
 }
 
 export const DEFAULT_GLOBAL: GlobalSettings = {
@@ -43,6 +46,9 @@ export const DEFAULT_GLOBAL: GlobalSettings = {
 
 export const DEFAULT_PROJECT: ProjectSettings = {
   version: SETTINGS_VERSION,
+  canvas: {
+    backgroundColor: '#252525',
+  },
 }
 
 function globalDir(): string {

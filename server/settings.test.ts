@@ -132,6 +132,12 @@ describe('writeProjectSettings', () => {
     expect(readProjectSettings('demo').version).toBe(SETTINGS_VERSION)
   })
 
+  test('keeps a project canvas background color', () => {
+    const result = writeProjectSettings('demo', { canvas: { backgroundColor: '#1C1C1E' } })
+    expect(result.canvas.backgroundColor).toBe('#1C1C1E')
+    expect(readProjectSettings('demo').canvas.backgroundColor).toBe('#1C1C1E')
+  })
+
   test('preserves arbitrary keys for forward-compat', () => {
     writeProjectSettings('demo', { future: { feature: true } })
     const raw = JSON.parse(

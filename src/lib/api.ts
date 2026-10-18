@@ -122,6 +122,9 @@ export interface GlobalSettings {
 
 export interface ProjectSettings {
   version: number
+  canvas: {
+    backgroundColor: string
+  }
 }
 
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T
