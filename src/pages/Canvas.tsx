@@ -7,6 +7,8 @@ import {
   useReactFlow,
   Background,
   Controls,
+  ControlButton,
+  SelectionMode,
   type NodeChange,
   type Node,
 } from '@xyflow/react'
@@ -137,6 +139,7 @@ function CanvasInner({ projectId }: { projectId: string }) {
   const [overrides, setOverrides] = useState<Map<string, string>>(new Map())
   const [helperLines, setHelperLines] = useState<{ horizontal?: number; vertical?: number }>({})
   const [pasteStatus, setPasteStatus] = useState<string | null>(null)
+  const [canvasMode, setCanvasMode] = useState<'pan' | 'select'>('pan')
 
   const settings = useSettings(projectId)
   const { snap: snapEnabled, snapPx, fitDurationMs } = settings.global.canvas
@@ -176,6 +179,15 @@ function CanvasInner({ projectId }: { projectId: string }) {
   }, [projectId])
 
   const resetOverrides = useCallback(() => setOverrides(new Map()), [])
+
+  const changeCanvasMode = useCallback((mode: 'pan' | 'select') => {
+    setCanvasMode(mode)
+    // Pan mode is deliberately navigation-only. Clearing the old selection
+    // prevents an accidental drag over a previously selected frame from moving it.
+    if (mode === 'pan') {
+      setNodes(nds => nds.map(node => node.selected ? { ...node, selected: false } : node))
+    }
+  }, [setNodes])
 
   const handlePasteImage = useCallback(async () => {
     try {
@@ -267,15 +279,14 @@ function CanvasInner({ projectId }: { projectId: string }) {
   }, [projectId])
 
   const nodesWithProject = useMemo(
-    // A frame becomes movable only after it has been selected.  Until then React
-    // Flow treats a drag that starts over the frame as a canvas pan, which keeps
-    // navigation predictable when the canvas is full of screens.
+    // In Pan mode every drag is navigation. Select mode delegates selection and
+    // multi-node dragging to React Flow, so selected frames move together.
     () => nodes.map(n => ({
       ...n,
-      draggable: Boolean(n.selected),
+      draggable: canvasMode === 'select',
       data: { ...n.data, projectId },
     })),
-    [nodes, projectId],
+    [nodes, projectId, canvasMode],
   )
 
   return (
@@ -367,9 +378,15 @@ function CanvasInner({ projectId }: { projectId: string }) {
           onBeforeDelete={handleBeforeDelete}
           nodeTypes={nodeTypes}
           nodesConnectable={false}
+          nodesDraggable={canvasMode === 'select'}
+          elementsSelectable={canvasMode === 'select'}
+          panOnDrag={canvasMode === 'pan'}
+          selectionOnDrag={canvasMode === 'select'}
+          selectionMode={SelectionMode.Partial}
           fitView
           minZoom={0.1}
           maxZoom={4}
+          style={{ cursor: canvasMode === 'pan' ? 'grab' : 'default' }}
           onNodeDoubleClick={(_, node) => {
             setNodes(nds => nds.map(n =>
               n.id === node.id ? { ...n, data: { ...n.data, editMode: true } } : n
@@ -385,7 +402,24 @@ function CanvasInner({ projectId }: { projectId: string }) {
           }}
         >
           <Background />
-          <Controls />
+          <Controls position="bottom-left">
+            <ControlButton
+              onClick={() => changeCanvasMode('pan')}
+              title="Pan mode — drag anywhere to move the canvas"
+              aria-label="Pan mode"
+              style={canvasModeButtonStyle(canvasMode === 'pan')}
+            >
+              ✋
+            </ControlButton>
+            <ControlButton
+              onClick={() => changeCanvasMode('select')}
+              title="Select mode — drag empty canvas to select multiple frames"
+              aria-label="Select mode"
+              style={canvasModeButtonStyle(canvasMode === 'select')}
+            >
+              ↖
+            </ControlButton>
+          </Controls>
           <HelperLines horizontal={helperLines.horizontal} vertical={helperLines.vertical} />
         </ReactFlow>
       </div>
@@ -433,6 +467,15 @@ const toolbarBtnStyle: React.CSSProperties = {
   cursor: 'pointer',
   fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
   boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
+}
+
+function canvasModeButtonStyle(active: boolean): React.CSSProperties {
+  return {
+    color: active ? '#fff' : '#222',
+    background: active ? '#2a4dff' : undefined,
+    fontSize: 16,
+    fontWeight: active ? 700 : 400,
+  }
 }
 
 export function Canvas() {
