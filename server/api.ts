@@ -122,6 +122,52 @@ function asNumber(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
+function renameHtmlFrameFile(projectId: string, frameId: string, requestedName: string): FrameEntry | null {
+  // A frame can live in a nested directory, but changing directories could break
+  // its relative asset URLs. The UI therefore only accepts a new basename and
+  // always keeps the existing directory.
+  if (
+    !requestedName.endsWith('.html') ||
+    path.posix.basename(requestedName) !== requestedName ||
+    requestedName.includes('\\') ||
+    requestedName === '.' ||
+    requestedName === '..'
+  ) {
+    throw Object.assign(new Error('Filename must be an HTML filename in the current directory'), { status: 400 })
+  }
+
+  const manifest = readManifest(projectId)
+  const entry = manifest.frames.find(frame => frame.id === frameId)
+  if (!entry) return null
+  if (!entry.file.endsWith('.html')) {
+    throw Object.assign(new Error('Only HTML frame files can be renamed'), { status: 400 })
+  }
+
+  const oldPath = resolveFrameFile(projectId, entry.file)
+  const nextFile = path.posix.join(path.posix.dirname(entry.file), requestedName)
+  const nextPath = resolveFrameFile(projectId, nextFile)
+  if (!oldPath || !nextPath || !fs.existsSync(oldPath) || !fs.statSync(oldPath).isFile()) {
+    throw Object.assign(new Error('Frame HTML file was not found'), { status: 404 })
+  }
+  if (oldPath === nextPath) return entry
+  if (fs.existsSync(nextPath)) {
+    throw Object.assign(new Error('A file with that name already exists'), { status: 409 })
+  }
+
+  // renameSync is atomic when both paths are on the same filesystem. If the
+  // manifest write fails, restore the source filename so disk and manifest do
+  // not diverge.
+  fs.renameSync(oldPath, nextPath)
+  try {
+    const updated = patchFrame(projectId, frameId, { file: nextFile })
+    if (!updated) throw new Error('Frame not found')
+    return updated
+  } catch (cause) {
+    try { fs.renameSync(nextPath, oldPath) } catch { /* preserve original write error */ }
+    throw cause
+  }
+}
+
 const routes: { method: string; pattern: RegExp; handler: Handler }[] = [
   {
     method: 'GET',
@@ -298,6 +344,25 @@ const routes: { method: string; pattern: RegExp; handler: Handler }[] = [
       const updated = patchFrame(id, frameId, patch)
       if (!updated) return error(res, 404, 'Frame not found')
       json(res, 200, updated)
+    },
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/projects\/([^/]+)\/frames\/([^/]+)\/rename-file$/,
+    handler: async (req, res, m) => {
+      const [, id, frameId] = m
+      if (!projectExists(id)) return error(res, 404, 'Project not found')
+      const body = (await readBody(req)) as { filename?: unknown }
+      const filename = asString(body.filename)
+      if (!filename) return error(res, 400, 'filename required')
+      try {
+        const updated = renameHtmlFrameFile(id, frameId, filename)
+        if (!updated) return error(res, 404, 'Frame not found')
+        json(res, 200, updated)
+      } catch (cause) {
+        const err = cause as Error & { status?: number }
+        error(res, err.status ?? 500, err.message)
+      }
     },
   },
   {

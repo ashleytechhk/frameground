@@ -35,6 +35,13 @@ export function patchFrame(projectId: string, frameId: string, patch: Partial<Om
   })
 }
 
+export function renameFrameFile(projectId: string, frameId: string, filename: string): Promise<FrameEntry> {
+  return req(`/api/projects/${projectId}/frames/${frameId}/rename-file`, {
+    method: 'POST',
+    body: JSON.stringify({ filename }),
+  })
+}
+
 export function deleteFrame(projectId: string, frameId: string, deleteFile = false): Promise<{ ok: true }> {
   const qs = deleteFile ? '?deleteFile=true' : ''
   return req(`/api/projects/${projectId}/frames/${frameId}${qs}`, { method: 'DELETE' })

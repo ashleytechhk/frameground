@@ -308,6 +308,58 @@ describe('PATCH /api/projects/:id/frames/:frameId', () => {
   })
 })
 
+describe('POST /api/projects/:id/frames/:frameId/rename-file', () => {
+  beforeEach(async () => {
+    await createDemo()
+    fs.mkdirSync(path.join(tmp, 'demo', 'screens'), { recursive: true })
+    await fetch(`${baseUrl}/api/projects/demo/frames`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'nested', name: 'Nested', file: 'screens/old.html', html: '<img src="asset.png">', x: 12, y: 34, w: 560, h: 780 }),
+    })
+  })
+
+  test('renames the HTML file, keeps its directory, manifest entry, and layout', async () => {
+    const res = await fetch(`${baseUrl}/api/projects/demo/frames/nested/rename-file`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: 'new.html' }),
+    })
+    expect(res.status).toBe(200)
+    expect(await getJson(res)).toEqual({ id: 'nested', name: 'Nested', file: 'screens/new.html' })
+    expect(fs.existsSync(path.join(tmp, 'demo', 'screens', 'old.html'))).toBe(false)
+    expect(fs.readFileSync(path.join(tmp, 'demo', 'screens', 'new.html'), 'utf-8')).toBe('<img src="asset.png">')
+
+    const manifest = await getJson(await fetch(`${baseUrl}/api/projects/demo/manifest`))
+    expect(manifest.frames).toContainEqual({ id: 'nested', name: 'Nested', file: 'screens/new.html' })
+    const layout = await getJson(await fetch(`${baseUrl}/api/projects/demo/layout`))
+    expect(layout.nested).toEqual({ x: 12, y: 34, w: 560, h: 780 })
+  })
+
+  test.each(['../outside.html', 'other/new.html', 'new.htm', 'new.html\\evil'])('rejects unsafe filename %s without changing disk or manifest', async filename => {
+    const res = await fetch(`${baseUrl}/api/projects/demo/frames/nested/rename-file`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename }),
+    })
+    expect(res.status).toBe(400)
+    expect(fs.existsSync(path.join(tmp, 'demo', 'screens', 'old.html'))).toBe(true)
+    expect(fs.existsSync(path.join(tmp, 'demo', 'screens', 'new.html'))).toBe(false)
+  })
+
+  test('does not overwrite an existing file', async () => {
+    fs.writeFileSync(path.join(tmp, 'demo', 'screens', 'taken.html'), 'keep me')
+    const res = await fetch(`${baseUrl}/api/projects/demo/frames/nested/rename-file`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: 'taken.html' }),
+    })
+    expect(res.status).toBe(409)
+    expect(fs.readFileSync(path.join(tmp, 'demo', 'screens', 'taken.html'), 'utf-8')).toBe('keep me')
+    expect(fs.existsSync(path.join(tmp, 'demo', 'screens', 'old.html'))).toBe(true)
+  })
+})
+
 describe('DELETE /api/projects/:id/frames/:frameId', () => {
   beforeEach(async () => {
     await createDemo()

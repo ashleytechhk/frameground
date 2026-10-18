@@ -35,7 +35,19 @@ export function useFrameSync(projectId: string, setNodes: SetNodes) {
         const existing = byId.get(entry.id)
         const l = layout[entry.id] ?? DEFAULT_LAYOUT
         if (existing) {
-          return { ...existing, data: { ...existing.data, name: entry.name, file: entry.file } }
+          const previousData = existing.data as { file?: string; url?: string }
+          const fileChanged = previousData.file !== entry.file
+          return {
+            ...existing,
+            data: {
+              ...existing.data,
+              name: entry.name,
+              file: entry.file,
+              // A renamed file needs a new iframe source. Keep the same node so
+              // React Flow retains its position, size, pan, and zoom state.
+              url: fileChanged ? `/frames/${projectId}/${entry.file}?v=${Date.now()}` : previousData.url,
+            },
+          }
         }
         return buildNode(projectId, entry, l)
       })

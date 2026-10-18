@@ -1,7 +1,7 @@
 import { memo, useCallback, useContext, useEffect, useRef } from 'react'
 import { NodeResizer, useReactFlow, type NodeProps } from '@xyflow/react'
 import type { HtmlFrameData } from './HtmlFrameShape'
-import { deleteFrame, patchFrame } from '../lib/api'
+import { deleteFrame, patchFrame, renameFrameFile } from '../lib/api'
 import { TokensSyncContext } from '../context/TokensSyncContext'
 
 const TITLE_BAR_HEIGHT = 32
@@ -49,6 +49,32 @@ function HtmlFrameNodeComponent({ id, data, selected }: NodeProps) {
       patchFrame(frameData.projectId, id, { name: newName }).catch(() => {})
     }
   }, [id, frameData.name, frameData.projectId, setNodes])
+
+  const handleRenameFile = useCallback(async () => {
+    if (!frameData.projectId) return
+    const slash = frameData.file.lastIndexOf('/')
+    const directory = slash === -1 ? '' : frameData.file.slice(0, slash)
+    const currentFilename = slash === -1 ? frameData.file : frameData.file.slice(slash + 1)
+    const nextFilename = prompt(
+      directory ? `HTML filename (stays in ${directory}/):` : 'HTML filename:',
+      currentFilename,
+    )
+    if (nextFilename === null || nextFilename === currentFilename) return
+    try {
+      const updated = await renameFrameFile(frameData.projectId, id, nextFilename)
+      setNodes(nodes => nodes.map(node => node.id === id ? {
+        ...node,
+        data: {
+          ...node.data,
+          file: updated.file,
+          url: `/frames/${frameData.projectId}/${updated.file}?v=${Date.now()}`,
+        },
+      } : node))
+    } catch (error) {
+      const message = error instanceof Error ? error.message.replace(/^\d+ [^:]+: /, '') : 'Could not rename HTML file'
+      alert(message)
+    }
+  }, [id, frameData.file, frameData.projectId, setNodes])
 
   const handleDelete = useCallback(() => {
     if (!frameData.projectId) return
@@ -109,7 +135,11 @@ function HtmlFrameNodeComponent({ id, data, selected }: NodeProps) {
             >
               {frameData.name}
             </span>
-            <span
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onClick={handleRenameFile}
               title={frameData.file}
               style={{
                 fontSize: 11,
@@ -119,10 +149,17 @@ function HtmlFrameNodeComponent({ id, data, selected }: NodeProps) {
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
                 minWidth: 0,
+                border: 'none',
+                background: 'none',
+                padding: 0,
+                cursor: 'text',
+                textAlign: 'left',
+                textDecoration: 'underline dotted',
+                textUnderlineOffset: 3,
               }}
             >
               {frameData.file}
-            </span>
+            </button>
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <button
