@@ -40,6 +40,25 @@ export function deleteFrame(projectId: string, frameId: string, deleteFile = fal
   return req(`/api/projects/${projectId}/frames/${frameId}${qs}`, { method: 'DELETE' })
 }
 
+export interface PastedImageResult {
+  frame: FrameEntry
+  layout: LayoutEntry
+  asset: { file: string; mime: string }
+}
+
+export function pasteImage(projectId: string, body: {
+  dataUrl: string
+  width: number
+  height: number
+  x: number
+  y: number
+}): Promise<PastedImageResult> {
+  return req(`/api/projects/${projectId}/pasted-images`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
 export function patchLayout(projectId: string, frameId: string, patch: Partial<LayoutEntry>): Promise<LayoutEntry> {
   return req(`/api/projects/${projectId}/layout/${frameId}`, {
     method: 'PATCH',

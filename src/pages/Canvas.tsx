@@ -22,7 +22,7 @@ import { TokensPanel } from '../components/TokensPanel'
 import { ChatDock } from '../components/ChatDock'
 import { SettingsPanel } from '../components/SettingsPanel'
 import { HelperLines } from '../components/HelperLines'
-import { deleteFrame, dismissSuggestion, patchLayout } from '../lib/api'
+import { deleteFrame, dismissSuggestion, pasteImage, patchLayout } from '../lib/api'
 import { getHelperLines } from '../lib/helperLines'
 import { useSettings } from '../hooks/useSettings'
 import type { LayoutEntry } from '../lib/manifest'
@@ -88,6 +88,40 @@ function buildOverridesCss(overrides: Map<string, string>): string {
   return imports ? `${imports}\n${root}` : root
 }
 
+async function clipboardImage(): Promise<{ dataUrl: string; width: number; height: number }> {
+  if (!navigator.clipboard?.read) {
+    throw new Error('This browser does not allow reading images from the clipboard.')
+  }
+  const items = await navigator.clipboard.read()
+  const item = items.find(candidate => candidate.types.some(type => /^image\/(png|jpeg|gif|webp|avif)$/.test(type)))
+  const type = item?.types.find(candidate => /^image\/(png|jpeg|gif|webp|avif)$/.test(candidate))
+  if (!item || !type) throw new Error('No supported image found in the clipboard.')
+  const blob = await item.getType(type)
+  if (blob.size > 12 * 1024 * 1024) throw new Error('The image is larger than 12 MB.')
+  const [dataUrl, dimensions] = await Promise.all([
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onerror = () => reject(new Error('Could not read the clipboard image.'))
+      reader.onload = () => resolve(String(reader.result))
+      reader.readAsDataURL(blob)
+    }),
+    new Promise<{ width: number; height: number }>((resolve, reject) => {
+      const image = new Image()
+      const url = URL.createObjectURL(blob)
+      image.onload = () => {
+        URL.revokeObjectURL(url)
+        resolve({ width: image.naturalWidth, height: image.naturalHeight })
+      }
+      image.onerror = () => {
+        URL.revokeObjectURL(url)
+        reject(new Error('Could not inspect the clipboard image.'))
+      }
+      image.src = url
+    }),
+  ])
+  return { dataUrl, ...dimensions }
+}
+
 function CanvasInner({ projectId }: { projectId: string }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const { loading } = useFrameSync(projectId, setNodes)
@@ -95,13 +129,14 @@ function CanvasInner({ projectId }: { projectId: string }) {
   const { design } = useDesignDoc(projectId)
   const { suggestions } = useSuggestions(projectId)
   const writeLayout = useLayoutWriter(projectId)
-  const { getNodes, getViewport, fitView } = useReactFlow()
+  const { getNodes, getViewport, fitView, screenToFlowPosition } = useReactFlow()
 
   const [panelOpen, setPanelOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [overrides, setOverrides] = useState<Map<string, string>>(new Map())
   const [helperLines, setHelperLines] = useState<{ horizontal?: number; vertical?: number }>({})
+  const [pasteStatus, setPasteStatus] = useState<string | null>(null)
 
   const settings = useSettings(projectId)
   const { snap: snapEnabled, snapPx, fitDurationMs } = settings.global.canvas
@@ -141,6 +176,26 @@ function CanvasInner({ projectId }: { projectId: string }) {
   }, [projectId])
 
   const resetOverrides = useCallback(() => setOverrides(new Map()), [])
+
+  const handlePasteImage = useCallback(async () => {
+    try {
+      setPasteStatus('Reading clipboard…')
+      const image = await clipboardImage()
+      const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+      const scale = Math.min(1, 1200 / image.width, 1200 / image.height)
+      const width = Math.max(240, Math.round(image.width * scale))
+      const height = Math.max(180, Math.round(image.height * scale))
+      await pasteImage(projectId, {
+        ...image,
+        x: Math.round(center.x - width / 2),
+        y: Math.round(center.y - height / 2),
+      })
+      setPasteStatus('Image added')
+      window.setTimeout(() => setPasteStatus(null), 2000)
+    } catch (error) {
+      setPasteStatus(error instanceof Error ? error.message : 'Could not paste the image.')
+    }
+  }, [projectId, screenToFlowPosition])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -250,6 +305,13 @@ function CanvasInner({ projectId }: { projectId: string }) {
           }}
         >
           {loading && <span style={{ fontSize: 13, color: '#666' }}>Loading…</span>}
+          <button
+            onClick={() => { void handlePasteImage() }}
+            title="Paste an image from the clipboard"
+            style={toolbarBtnStyle}
+          >
+            Paste image
+          </button>
           {!chatOpen && (
             <button
               onClick={() => setChatOpen(true)}
@@ -278,6 +340,19 @@ function CanvasInner({ projectId }: { projectId: string }) {
             </button>
           )}
         </div>
+        {pasteStatus && (
+          <div
+            role="status"
+            style={{
+              position: 'absolute', top: 52, right: 12, zIndex: 10,
+              maxWidth: 320, background: 'rgba(35,35,35,0.88)', color: '#fff',
+              padding: '7px 10px', borderRadius: 6, fontSize: 12,
+              fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
+            }}
+          >
+            {pasteStatus}
+          </div>
+        )}
         <ReactFlow
           nodes={nodesWithProject}
           edges={[]}

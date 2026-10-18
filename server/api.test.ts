@@ -232,6 +232,43 @@ describe('POST /api/projects/:id/frames', () => {
   })
 })
 
+describe('POST /api/projects/:id/pasted-images', () => {
+  beforeEach(createDemo)
+
+  const pngDataUrl = `data:image/png;base64,${Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64')}`
+
+  test('writes a managed raster asset and creates a canvas frame', async () => {
+    const res = await fetch(`${baseUrl}/api/projects/demo/pasted-images`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dataUrl: pngDataUrl, width: 600, height: 400, x: 42, y: 84 }),
+    })
+    expect(res.status).toBe(201)
+    const body = await getJson(res)
+    expect(body.frame.id).toMatch(/^pasted-image-/)
+    expect(body.frame.file).toMatch(/^frames\/pasted-images\/pasted-image-.*\.html$/)
+    expect(body.asset).toMatchObject({ file: expect.stringMatching(/^assets\/pasted-images\/pasted-image-.*\.png$/), mime: 'image/png' })
+    expect(body.layout).toEqual({ x: 42, y: 84, w: 600, h: 400 })
+    expect(fs.readFileSync(path.join(tmp, 'demo', body.asset.file))).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    expect(fs.readFileSync(path.join(tmp, 'demo', body.frame.file), 'utf-8')).toContain(`../../${body.asset.file}`)
+
+    const manifest = await getJson(await fetch(`${baseUrl}/api/projects/demo/manifest`))
+    expect(manifest.frames).toContainEqual(body.frame)
+    const layout = await getJson(await fetch(`${baseUrl}/api/projects/demo/layout`))
+    expect(layout[body.frame.id]).toEqual(body.layout)
+  })
+
+  test('rejects an unsupported or fake image payload', async () => {
+    const res = await fetch(`${baseUrl}/api/projects/demo/pasted-images`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dataUrl: 'data:image/png;base64,aGVsbG8=' }),
+    })
+    expect(res.status).toBe(400)
+    expect(fs.existsSync(path.join(tmp, 'demo', 'assets', 'pasted-images'))).toBe(false)
+  })
+})
+
 describe('PATCH /api/projects/:id/frames/:frameId', () => {
   beforeEach(async () => {
     await createDemo()
@@ -360,6 +397,23 @@ describe('GET /frames/:projectId/:file', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toMatch(/text\/html/)
     expect(await res.text()).toBe('<h1>served</h1>')
+  })
+
+  test.each([
+    ['png', 'image/png'],
+    ['jpg', 'image/jpeg'],
+    ['jpeg', 'image/jpeg'],
+    ['gif', 'image/gif'],
+    ['webp', 'image/webp'],
+    ['avif', 'image/avif'],
+  ])('serves pasted-image compatible .%s files with %s MIME type', async (extension, contentType) => {
+    const relative = `assets/pasted-images/test.${extension}`
+    const file = path.join(tmp, 'demo', relative)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, 'image data')
+    const res = await fetch(`${baseUrl}/frames/demo/${relative}`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe(contentType)
   })
 
   test('404s for nonexistent project', async () => {
