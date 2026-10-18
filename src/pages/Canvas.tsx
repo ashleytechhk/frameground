@@ -267,7 +267,14 @@ function CanvasInner({ projectId }: { projectId: string }) {
   }, [projectId])
 
   const nodesWithProject = useMemo(
-    () => nodes.map(n => ({ ...n, data: { ...n.data, projectId } })),
+    // A frame becomes movable only after it has been selected.  Until then React
+    // Flow treats a drag that starts over the frame as a canvas pan, which keeps
+    // navigation predictable when the canvas is full of screens.
+    () => nodes.map(n => ({
+      ...n,
+      draggable: Boolean(n.selected),
+      data: { ...n.data, projectId },
+    })),
     [nodes, projectId],
   )
 
@@ -369,9 +376,12 @@ function CanvasInner({ projectId }: { projectId: string }) {
             ))
           }}
           onPaneClick={() => {
-            setNodes(nds => nds.map(n =>
-              n.data.editMode ? { ...n, data: { ...n.data, editMode: false } } : n
-            ))
+            setNodes(nds => nds.map(n => {
+              const editMode = n.data.editMode ? false : n.data.editMode
+              return n.selected || editMode !== n.data.editMode
+                ? { ...n, selected: false, data: { ...n.data, editMode } }
+                : n
+            }))
           }}
         >
           <Background />

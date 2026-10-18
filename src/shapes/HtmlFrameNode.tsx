@@ -93,8 +93,8 @@ function HtmlFrameNodeComponent({ id, data, selected }: NodeProps) {
           flexDirection: 'column',
           borderRadius: 8,
           overflow: 'hidden',
-          boxShadow: '0 2px 12px rgba(0,0,0,0.15)',
-          border: '1px solid #e0e0e0',
+          boxShadow: selected ? '0 0 0 2px #2a4dff, 0 4px 16px rgba(42,77,255,0.25)' : '0 2px 12px rgba(0,0,0,0.15)',
+          border: `1px solid ${selected ? '#2a4dff' : '#e0e0e0'}`,
           background: '#fff',
         }}
       >
