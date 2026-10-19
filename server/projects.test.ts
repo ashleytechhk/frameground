@@ -8,6 +8,8 @@ import {
   ensureRoot,
   bootstrapBundledSamples,
   isSymlinkProjectRegistry,
+  ProjectRegistryMetadataError,
+  ProjectRegistryMetadataStore,
   projectDir,
   projectExists,
   listProjects,
@@ -260,6 +262,112 @@ describe('managed symlink registry', () => {
   test('does not create an unregistered regular project', () => {
     enableRegistry()
     expect(() => createProject('new-project')).toThrow(/registered directory symlinks/)
+  })
+})
+
+describe('project registry card metadata', () => {
+  function ownedStore(): ProjectRegistryMetadataStore {
+    fs.writeFileSync(path.join(tmp, '.frameground-registry.json'), JSON.stringify({
+      version: 1,
+      mode: 'symlink',
+      preserved: 'keep-this',
+    }))
+    for (const id of ['alpha', 'beta']) {
+      const source = path.join(tmp, `source-${id}`)
+      fs.mkdirSync(source)
+      fs.symlinkSync(source, path.join(tmp, id), 'dir')
+    }
+    // Treat the temporary root as the store's trusted repo-owned root. This
+    // exercises persistence without ever touching the actual checkout.
+    return new ProjectRegistryMetadataStore(tmp, tmp)
+  }
+
+  function expectRegistryError(action: () => unknown, status: number): void {
+    try {
+      action()
+      throw new Error('Expected a registry metadata error')
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(ProjectRegistryMetadataError)
+      expect((cause as ProjectRegistryMetadataError).status).toBe(status)
+    }
+  }
+
+  test('persists card color and order in the local marker and reloads them', () => {
+    const store = ownedStore()
+
+    expect(store.setColor('alpha', '#AbC123')).toEqual({ color: '#abc123' })
+    expect(store.setOrder(['beta', 'alpha'])).toEqual(['beta', 'alpha'])
+
+    const reloaded = new ProjectRegistryMetadataStore(tmp, tmp)
+    expect(reloaded.read()).toEqual({
+      projectOrder: ['beta', 'alpha'],
+      projects: { alpha: { color: '#abc123' } },
+    })
+    expect(reloaded.listProjectIds()).toEqual(['beta', 'alpha'])
+    expect(JSON.parse(fs.readFileSync(path.join(tmp, '.frameground-registry.json'), 'utf-8'))).toMatchObject({
+      version: 1,
+      mode: 'symlink',
+      preserved: 'keep-this',
+      projectOrder: ['beta', 'alpha'],
+      projects: { alpha: { color: '#abc123' } },
+    })
+
+    expect(reloaded.setColor('alpha', null)).toEqual({})
+    expect(new ProjectRegistryMetadataStore(tmp, tmp).read().projects).toEqual({})
+  })
+
+  test('rejects invalid colors, unknown ids, non-symlink ids, and invalid full orders without changing the marker', () => {
+    const store = ownedStore()
+    fs.mkdirSync(path.join(tmp, 'regular-project'))
+    const fileSource = path.join(tmp, 'not-a-project')
+    fs.writeFileSync(fileSource, 'not a workspace')
+    fs.symlinkSync(fileSource, path.join(tmp, 'file-project'))
+    fs.symlinkSync(path.join(tmp, 'missing-workspace'), path.join(tmp, 'broken-project'), 'dir')
+    const marker = path.join(tmp, '.frameground-registry.json')
+    const before = fs.readFileSync(marker, 'utf-8')
+
+    expectRegistryError(() => store.setColor('alpha', 'red'), 400)
+    expectRegistryError(() => store.setColor('../escape', '#112233'), 404)
+    expectRegistryError(() => store.setColor('regular-project', '#112233'), 404)
+    expectRegistryError(() => store.setColor('file-project', '#112233'), 404)
+    expectRegistryError(() => store.setColor('broken-project', '#112233'), 404)
+    expectRegistryError(() => store.setOrder(['alpha', 'alpha']), 400)
+    expectRegistryError(() => store.setOrder(['alpha']), 400)
+    expectRegistryError(() => store.setOrder(['alpha', 'missing']), 404)
+    expectRegistryError(() => store.setOrder(['alpha', '../escape']), 400)
+    expect(fs.readFileSync(marker, 'utf-8')).toBe(before)
+  })
+
+  test('does not read or write metadata for an external caller-specified root', () => {
+    const owned = ownedStore()
+    owned.setColor('alpha', '#112233')
+    const marker = path.join(tmp, '.frameground-registry.json')
+    const before = fs.readFileSync(marker, 'utf-8')
+    const external = new ProjectRegistryMetadataStore(tmp, path.join(tmp, 'another-repository', 'projects'))
+
+    expect(external.read()).toEqual({ projectOrder: [], projects: {} })
+    expectRegistryError(() => external.setColor('alpha', '#abcdef'), 409)
+    expectRegistryError(() => external.setOrder(['alpha', 'beta']), 409)
+    expect(fs.readFileSync(marker, 'utf-8')).toBe(before)
+  })
+
+  test('ignores malformed persisted card fields and stale order ids', () => {
+    ownedStore()
+    fs.writeFileSync(path.join(tmp, '.frameground-registry.json'), JSON.stringify({
+      version: 1,
+      mode: 'symlink',
+      projectOrder: ['beta', 'beta', '../escape', 'alpha'],
+      projects: {
+        alpha: { color: '#AA00FF' },
+        beta: { color: 'javascript:bad' },
+        '../escape': { color: '#001122' },
+      },
+    }))
+
+    expect(new ProjectRegistryMetadataStore(tmp, tmp).read()).toEqual({
+      projectOrder: ['beta', 'alpha'],
+      projects: { alpha: { color: '#aa00ff' } },
+    })
   })
 })
 

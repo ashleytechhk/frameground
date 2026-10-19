@@ -20,15 +20,20 @@ export function createProject(name: string): Promise<{ id: string }> {
   return req('/api/projects', { method: 'POST', body: JSON.stringify({ name }) })
 }
 
+export interface ProjectCardMetadata {
+  /** Optional user-selected project card color, serialized as `#RRGGBB`. */
+  color?: string
+}
+
 export type WorkspaceSummary =
-  | { id: string; kind: 'html' }
-  | {
+  | ({ id: string; kind: 'html' } & ProjectCardMetadata)
+  | ({
       id: string
       kind: 'flutter'
       version: 1
       defaultCanvasId: string
       canvases: FlutterCanvas[]
-    }
+    } & ProjectCardMetadata)
 
 export interface FlutterCanvas {
   id: string
@@ -61,6 +66,20 @@ export function createFlutterWorkspace(name: string, canvasId = 'onboarding'): P
   return req('/api/flutter-workspaces', {
     method: 'POST',
     body: JSON.stringify({ name, canvasId }),
+  })
+}
+
+export function patchProjectCardColor(projectId: string, color: string | null): Promise<{ id: string } & ProjectCardMetadata> {
+  return req(`/api/projects/${projectId}/card`, {
+    method: 'PATCH',
+    body: JSON.stringify({ color }),
+  })
+}
+
+export function patchProjectOrder(projectIds: string[]): Promise<{ projectIds: string[] }> {
+  return req('/api/projects/order', {
+    method: 'PATCH',
+    body: JSON.stringify({ projectIds }),
   })
 }
 

@@ -2,7 +2,19 @@ import type { IncomingMessage, ServerResponse } from 'http'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { createProject, listProjects, projectDir, projectExists, projectsRoot, resolveFrameFile, validProjectId } from './projects.ts'
+import {
+  createProject,
+  listProjects,
+  projectDir,
+  projectExists,
+  projectsRoot,
+  readProjectRegistryMetadata,
+  resolveFrameFile,
+  setProjectCardColor,
+  setProjectOrder,
+  validProjectId,
+  ProjectRegistryMetadataError,
+} from './projects.ts'
 import { appendFrame, patchFrame, readManifest, removeFrame } from './manifest.ts'
 import { patchLayoutEntry, readLayout, removeLayoutEntry } from './layout.ts'
 import { readProjectDesign, tokensToCss, writeDesignTokens } from './design.ts'
@@ -135,6 +147,18 @@ function asNumber(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
+function asObject(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
+}
+
+function registryMetadataError(res: ServerResponse, cause: unknown): void {
+  if (cause instanceof ProjectRegistryMetadataError) {
+    error(res, cause.status, cause.message)
+    return
+  }
+  error(res, 500, cause instanceof Error ? cause.message : 'Could not update project card metadata')
+}
+
 function renameHtmlFrameFile(projectId: string, frameId: string, requestedName: string): FrameEntry | null {
   // A frame can live in a nested directory, but changing directories could break
   // its relative asset URLs. The UI therefore only accepts a new basename and
@@ -186,11 +210,13 @@ const routes: { method: string; pattern: RegExp; handler: Handler }[] = [
     method: 'GET',
     pattern: /^\/api\/workspaces$/,
     handler: (_req, res) => {
+      const registryMetadata = readProjectRegistryMetadata()
       const workspaces = listProjects().map(id => {
         const flutter = readFlutterWorkspace(id)
+        const color = registryMetadata.projects[id]?.color
         return flutter
-          ? { ...flutter, canvases: listFlutterCanvases(id) }
-          : { id, kind: 'html' as const }
+          ? { ...flutter, canvases: listFlutterCanvases(id), ...(color ? { color } : {}) }
+          : { id, kind: 'html' as const, ...(color ? { color } : {}) }
       })
       json(res, 200, { workspaces })
     },
@@ -338,9 +364,13 @@ const routes: { method: string; pattern: RegExp; handler: Handler }[] = [
     pattern: /^\/api\/workspace$/,
     handler: (_req, res) => {
       const root = projectsRoot()
+      const registryMetadata = readProjectRegistryMetadata()
       json(res, 200, {
         root,
-        projects: listProjects().map(id => ({ id, path: projectDir(id) })),
+        projects: listProjects().map(id => {
+          const color = registryMetadata.projects[id]?.color
+          return { id, path: projectDir(id), ...(color ? { color } : {}) }
+        }),
       })
     },
   },
@@ -359,6 +389,35 @@ const routes: { method: string; pattern: RegExp; handler: Handler }[] = [
       if (projectExists(name)) return error(res, 409, 'Project already exists')
       createProject(name)
       json(res, 201, { id: name })
+    },
+  },
+  {
+    method: 'PATCH',
+    pattern: /^\/api\/projects\/order$/,
+    handler: async (req, res) => {
+      const body = asObject(await readBody(req))
+      if (!body || !Object.hasOwn(body, 'projectIds')) return error(res, 400, 'projectIds array required')
+      try {
+        json(res, 200, { projectIds: setProjectOrder(body.projectIds) })
+      } catch (cause) {
+        registryMetadataError(res, cause)
+      }
+    },
+  },
+  {
+    method: 'PATCH',
+    pattern: /^\/api\/projects\/([^/]+)\/card$/,
+    handler: async (req, res, m) => {
+      const [, id] = m
+      const body = asObject(await readBody(req))
+      if (!body || !Object.hasOwn(body, 'color')) return error(res, 400, 'color is required')
+      const color = body.color
+      if (color !== null && typeof color !== 'string') return error(res, 400, 'color must be a #RRGGBB value or null')
+      try {
+        json(res, 200, { id, ...setProjectCardColor(id, color) })
+      } catch (cause) {
+        registryMetadataError(res, cause)
+      }
     },
   },
   {

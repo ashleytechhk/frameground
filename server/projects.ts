@@ -1,5 +1,6 @@
 import path from 'path'
 import fs from 'fs'
+import { randomUUID } from 'crypto'
 import { fileURLToPath } from 'url'
 
 const PROJECT_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/
@@ -7,6 +8,31 @@ const REGISTRY_FILE = '.frameground-registry.json'
 const BUNDLED_SAMPLE_IDS = ['flutter-sample', 'html-sample'] as const
 const BUNDLED_PROJECTS_ROOT = path.resolve(fileURLToPath(new URL('../projects/', import.meta.url)))
 const BUNDLED_SAMPLES_ROOT = path.resolve(fileURLToPath(new URL('../samples/', import.meta.url)))
+const CARD_COLOR_RE = /^#[0-9a-f]{6}$/i
+
+export interface ProjectCardMetadata {
+  color?: string
+}
+
+export interface ProjectRegistryMetadata {
+  projectOrder: string[]
+  projects: Record<string, ProjectCardMetadata>
+}
+
+type RegistryDocument = Record<string, unknown> & {
+  version?: unknown
+  mode?: unknown
+}
+
+/** An expected metadata request failure which routes can safely return to clients. */
+export class ProjectRegistryMetadataError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
 
 const DESIGN_REFERENCE = {
   id: 'design-reference',
@@ -189,6 +215,60 @@ export function validProjectId(id: string): boolean {
   return PROJECT_ID_RE.test(id)
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function readRegistryDocument(root: string): RegistryDocument | null {
+  try {
+    const value = JSON.parse(fs.readFileSync(path.join(root, REGISTRY_FILE), 'utf-8')) as unknown
+    return isPlainObject(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+function hasLocalRegistryMarker(root: string): boolean {
+  try {
+    // Never write through a symlinked marker, even inside the repository-owned
+    // registry. Metadata must remain a local registry concern.
+    return fs.lstatSync(path.join(root, REGISTRY_FILE)).isFile()
+  } catch {
+    return false
+  }
+}
+
+function normalizeCardColor(value: unknown): string | null {
+  return typeof value === 'string' && CARD_COLOR_RE.test(value) ? value.toLowerCase() : null
+}
+
+function emptyRegistryMetadata(): ProjectRegistryMetadata {
+  return { projectOrder: [], projects: {} }
+}
+
+function parseRegistryMetadata(document: RegistryDocument | null): ProjectRegistryMetadata {
+  if (!document) return emptyRegistryMetadata()
+
+  const seen = new Set<string>()
+  const projectOrder = Array.isArray(document.projectOrder)
+    ? document.projectOrder.flatMap(value => {
+        if (typeof value !== 'string' || !validProjectId(value) || seen.has(value)) return []
+        seen.add(value)
+        return [value]
+      })
+    : []
+
+  const projects: Record<string, ProjectCardMetadata> = {}
+  if (isPlainObject(document.projects)) {
+    for (const [id, value] of Object.entries(document.projects)) {
+      if (!validProjectId(id) || !isPlainObject(value)) continue
+      const color = normalizeCardColor(value.color)
+      if (color) projects[id] = { color }
+    }
+  }
+  return { projectOrder, projects }
+}
+
 /**
  * A registry marker makes one projects root deliberately opt into link-only
  * discovery. This keeps Frameground's normal local-project workflow intact,
@@ -196,13 +276,8 @@ export function validProjectId(id: string): boolean {
  * multiple repositories without scanning unrelated folders.
  */
 export function isSymlinkProjectRegistry(root = projectsRoot()): boolean {
-  const file = path.join(root, REGISTRY_FILE)
-  try {
-    const value = JSON.parse(fs.readFileSync(file, 'utf-8')) as { mode?: unknown; version?: unknown }
-    return value.version === 1 && value.mode === 'symlink'
-  } catch {
-    return false
-  }
+  const value = readRegistryDocument(root)
+  return value?.version === 1 && value.mode === 'symlink'
 }
 
 function logicalProjectDir(id: string): string {
@@ -217,6 +292,145 @@ function isDirectorySymlink(root: string, id: string): boolean {
     // This includes broken links and links to ordinary files.
     return false
   }
+}
+
+function discoveredProjectIds(root: string): string[] {
+  const linksOnly = isSymlinkProjectRegistry(root)
+  try {
+    return fs
+      .readdirSync(root, { withFileTypes: true })
+      .filter(entry => validProjectId(entry.name) && (linksOnly ? isDirectorySymlink(root, entry.name) : entry.isDirectory()))
+      .map(entry => entry.name)
+      .sort()
+  } catch {
+    return []
+  }
+}
+
+function orderProjectIds(ids: string[], projectOrder: string[]): string[] {
+  const known = new Set(ids)
+  const ordered = projectOrder.filter(id => known.delete(id))
+  return [...ordered, ...ids.filter(id => known.has(id))]
+}
+
+/**
+ * The production store defaults to Frameground's own `projects/` directory.
+ * `repoOwnedRoot` is injectable only to keep isolated filesystem tests from
+ * touching a real checkout; HTTP requests never control either value.
+ */
+export class ProjectRegistryMetadataStore {
+  private readonly root: string
+  private readonly repoOwnedRoot: string
+
+  constructor(root = projectsRoot(), repoOwnedRoot = BUNDLED_PROJECTS_ROOT) {
+    this.root = path.resolve(root)
+    this.repoOwnedRoot = path.resolve(repoOwnedRoot)
+  }
+
+  read(): ProjectRegistryMetadata {
+    // Caller-specified PROJECTS_ROOT values remain data-only project sources.
+    // Do not read or surface arbitrary metadata from them.
+    if (this.root !== this.repoOwnedRoot || !hasLocalRegistryMarker(this.root) || !isSymlinkProjectRegistry(this.root)) {
+      return emptyRegistryMetadata()
+    }
+    return parseRegistryMetadata(readRegistryDocument(this.root))
+  }
+
+  listProjectIds(): string[] {
+    return orderProjectIds(discoveredProjectIds(this.root), this.read().projectOrder)
+  }
+
+  private assertWritable(): void {
+    if (this.root !== this.repoOwnedRoot) {
+      throw new ProjectRegistryMetadataError('Project card metadata is only available in the repo-owned registry', 409)
+    }
+    if (!hasLocalRegistryMarker(this.root) || !isSymlinkProjectRegistry(this.root)) {
+      throw new ProjectRegistryMetadataError('Project card metadata requires a local symlink registry', 409)
+    }
+  }
+
+  private assertRegisteredProject(id: string): void {
+    if (!validProjectId(id) || !discoveredProjectIds(this.root).includes(id)) {
+      throw new ProjectRegistryMetadataError('Registered project not found', 404)
+    }
+  }
+
+  private write(metadata: ProjectRegistryMetadata): void {
+    const document = readRegistryDocument(this.root)
+    if (!document) throw new ProjectRegistryMetadataError('Project registry metadata is invalid', 409)
+
+    const next: RegistryDocument = { ...document }
+    if (metadata.projectOrder.length > 0) next.projectOrder = metadata.projectOrder
+    else delete next.projectOrder
+    if (Object.keys(metadata.projects).length > 0) next.projects = metadata.projects
+    else delete next.projects
+
+    const file = path.join(this.root, REGISTRY_FILE)
+    const temp = `${file}.${process.pid}.${randomUUID()}.tmp`
+    fs.writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`, { flag: 'wx' })
+    try {
+      fs.renameSync(temp, file)
+    } catch (error) {
+      try { fs.unlinkSync(temp) } catch { /* preserve the original write error */ }
+      throw error
+    }
+  }
+
+  setColor(id: string, color: string | null): ProjectCardMetadata {
+    if (color !== null && !normalizeCardColor(color)) {
+      throw new ProjectRegistryMetadataError('color must be a #RRGGBB value or null', 400)
+    }
+    this.assertWritable()
+    this.assertRegisteredProject(id)
+
+    const metadata = this.read()
+    if (color === null) {
+      delete metadata.projects[id]
+    } else {
+      metadata.projects[id] = { color: normalizeCardColor(color)! }
+    }
+    this.write(metadata)
+    return metadata.projects[id] ?? {}
+  }
+
+  setOrder(projectIds: unknown): string[] {
+    if (!Array.isArray(projectIds) || projectIds.some(id => typeof id !== 'string' || !validProjectId(id))) {
+      throw new ProjectRegistryMetadataError('projectIds must be an array of project ids', 400)
+    }
+
+    const ids = projectIds as string[]
+    const unique = new Set(ids)
+    if (unique.size !== ids.length) {
+      throw new ProjectRegistryMetadataError('projectIds must not contain duplicates', 400)
+    }
+
+    this.assertWritable()
+    const registered = discoveredProjectIds(this.root)
+    const known = new Set(registered)
+    if (ids.some(id => !known.has(id))) {
+      throw new ProjectRegistryMetadataError('Registered project not found', 404)
+    }
+    if (ids.length !== registered.length) {
+      throw new ProjectRegistryMetadataError('projectIds must include every registered project exactly once', 400)
+    }
+
+    const metadata = this.read()
+    metadata.projectOrder = [...ids]
+    this.write(metadata)
+    return metadata.projectOrder
+  }
+}
+
+export function readProjectRegistryMetadata(): ProjectRegistryMetadata {
+  return new ProjectRegistryMetadataStore().read()
+}
+
+export function setProjectCardColor(id: string, color: string | null): ProjectCardMetadata {
+  return new ProjectRegistryMetadataStore().setColor(id, color)
+}
+
+export function setProjectOrder(projectIds: unknown): string[] {
+  return new ProjectRegistryMetadataStore().setOrder(projectIds)
 }
 
 function canonicalExistingProjectDir(id: string): string | null {
@@ -249,12 +463,7 @@ export function projectExists(id: string): boolean {
 
 export function listProjects(): string[] {
   const root = ensureRoot()
-  const linksOnly = isSymlinkProjectRegistry(root)
-  return fs
-    .readdirSync(root, { withFileTypes: true })
-    .filter(e => validProjectId(e.name) && (linksOnly ? isDirectorySymlink(root, e.name) : e.isDirectory()))
-    .map(e => e.name)
-    .sort()
+  return new ProjectRegistryMetadataStore(root).listProjectIds()
 }
 
 export function createProject(id: string): void {

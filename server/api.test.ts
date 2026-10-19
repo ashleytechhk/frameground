@@ -101,6 +101,44 @@ describe('GET /api/projects', () => {
   })
 })
 
+describe('PATCH project card metadata', () => {
+  beforeEach(createDemo)
+
+  test('validates malformed card color and order bodies before any registry write', async () => {
+    const invalidColor = await fetch(`${baseUrl}/api/projects/demo/card`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ color: 'red' }),
+    })
+    expect(invalidColor.status).toBe(400)
+
+    const duplicateOrder = await fetch(`${baseUrl}/api/projects/order`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectIds: ['demo', 'demo'] }),
+    })
+    expect(duplicateOrder.status).toBe(400)
+    expect(fs.existsSync(path.join(tmp, '.frameground-registry.json'))).toBe(false)
+  })
+
+  test('does not write card metadata into a caller-specified projects root', async () => {
+    const color = await fetch(`${baseUrl}/api/projects/demo/card`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ color: '#112233' }),
+    })
+    expect(color.status).toBe(409)
+
+    const order = await fetch(`${baseUrl}/api/projects/order`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectIds: ['demo'] }),
+    })
+    expect(order.status).toBe(409)
+    expect(fs.existsSync(path.join(tmp, '.frameground-registry.json'))).toBe(false)
+  })
+})
+
 describe('POST /api/projects', () => {
   test('creates project and returns id', async () => {
     const res = await fetch(`${baseUrl}/api/projects`, {
