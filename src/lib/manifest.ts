@@ -1,7 +1,9 @@
 export interface FrameEntry {
   id: string
   name: string
-  file: string
+  file?: string
+  screenId?: string
+  kind?: 'html' | 'flutter'
 }
 
 export interface Manifest {

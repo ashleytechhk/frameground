@@ -1,7 +1,11 @@
 export interface FrameEntry {
   id: string
   name: string
-  file: string
+  /** HTML source for legacy Frameground frames. */
+  file?: string
+  /** Shared Flutter PreviewCatalog key for a live Flutter frame. */
+  screenId?: string
+  kind?: 'html' | 'flutter'
 }
 
 export interface Manifest {

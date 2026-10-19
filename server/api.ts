@@ -16,6 +16,19 @@ import {
   readProjectSettings,
   writeProjectSettings,
 } from './settings.ts'
+import {
+  appendFlutterScreen,
+  createFlutterCanvas,
+  createFlutterWorkspace,
+  flutterCanvasExists,
+  flutterRunners,
+  isFlutterWorkspace,
+  listFlutterCanvases,
+  readFlutterCanvasLayout,
+  readFlutterCanvasManifest,
+  readFlutterWorkspace,
+  patchFlutterCanvasLayout,
+} from './flutter.ts'
 import type { FrameEntry, LayoutEntry } from './types.ts'
 
 type Handler = (req: IncomingMessage, res: ServerResponse, match: RegExpMatchArray) => Promise<void> | void
@@ -139,7 +152,7 @@ function renameHtmlFrameFile(projectId: string, frameId: string, requestedName: 
   const manifest = readManifest(projectId)
   const entry = manifest.frames.find(frame => frame.id === frameId)
   if (!entry) return null
-  if (!entry.file.endsWith('.html')) {
+  if (!entry.file || !entry.file.endsWith('.html')) {
     throw Object.assign(new Error('Only HTML frame files can be renamed'), { status: 400 })
   }
 
@@ -169,6 +182,157 @@ function renameHtmlFrameFile(projectId: string, frameId: string, requestedName: 
 }
 
 const routes: { method: string; pattern: RegExp; handler: Handler }[] = [
+  {
+    method: 'GET',
+    pattern: /^\/api\/workspaces$/,
+    handler: (_req, res) => {
+      const workspaces = listProjects().map(id => {
+        const flutter = readFlutterWorkspace(id)
+        return flutter
+          ? { ...flutter, canvases: listFlutterCanvases(id) }
+          : { id, kind: 'html' as const }
+      })
+      json(res, 200, { workspaces })
+    },
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/flutter-workspaces$/,
+    handler: async (req, res) => {
+      const body = (await readBody(req)) as { name?: unknown; canvasId?: unknown }
+      const name = asString(body.name)
+      const canvasId = asString(body.canvasId) ?? 'onboarding'
+      if (!name || !validProjectId(name)) return error(res, 400, 'Invalid workspace name')
+      try {
+        const workspace = createFlutterWorkspace(name, canvasId)
+        json(res, 201, { ...workspace, canvases: listFlutterCanvases(name) })
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : 'Could not create Flutter workspace'
+        error(res, /already exists/i.test(message) ? 409 : 400, message)
+      }
+    },
+  },
+  {
+    method: 'PATCH',
+    pattern: /^\/api\/flutter-workspaces\/([^/]+)\/canvases\/([^/]+)\/layout\/([^/]+)$/,
+    handler: async (req, res, m) => {
+      const [, workspaceId, canvasId, frameId] = m
+      if (!flutterCanvasExists(workspaceId, canvasId)) return error(res, 404, 'Flutter canvas not found')
+      const body = (await readBody(req)) as { x?: unknown; y?: unknown; w?: unknown; h?: unknown }
+      const patch: Partial<LayoutEntry> = {}
+      const x = asNumber(body.x); if (x !== null) patch.x = x
+      const y = asNumber(body.y); if (y !== null) patch.y = y
+      const w = asNumber(body.w); if (w !== null) patch.w = w
+      const h = asNumber(body.h); if (h !== null) patch.h = h
+      try {
+        json(res, 200, patchFlutterCanvasLayout(workspaceId, canvasId, frameId, patch))
+      } catch (cause) {
+        error(res, 400, cause instanceof Error ? cause.message : 'Could not update Flutter layout')
+      }
+    },
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/flutter-workspaces\/([^/]+)$/,
+    handler: (_req, res, m) => {
+      const [, workspaceId] = m
+      const workspace = readFlutterWorkspace(workspaceId)
+      if (!workspace) return error(res, 404, 'Flutter workspace not found')
+      json(res, 200, { ...workspace, canvases: listFlutterCanvases(workspaceId) })
+    },
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/flutter-workspaces\/([^/]+)\/canvases$/,
+    handler: async (req, res, m) => {
+      const [, workspaceId] = m
+      if (!isFlutterWorkspace(workspaceId)) return error(res, 404, 'Flutter workspace not found')
+      const body = (await readBody(req)) as { id?: unknown; name?: unknown }
+      const canvasId = asString(body.id)
+      const name = asString(body.name)
+      if (!canvasId) return error(res, 400, 'canvas id required')
+      try {
+        json(res, 201, createFlutterCanvas(workspaceId, canvasId, name ?? canvasId))
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : 'Could not create Flutter canvas'
+        error(res, /already exists/i.test(message) ? 409 : 400, message)
+      }
+    },
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/flutter-workspaces\/([^/]+)\/canvases\/([^/]+)\/manifest$/,
+    handler: (_req, res, m) => {
+      const [, workspaceId, canvasId] = m
+      if (!flutterCanvasExists(workspaceId, canvasId)) return error(res, 404, 'Flutter canvas not found')
+      json(res, 200, readFlutterCanvasManifest(workspaceId, canvasId))
+    },
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/flutter-workspaces\/([^/]+)\/canvases\/([^/]+)\/layout$/,
+    handler: (_req, res, m) => {
+      const [, workspaceId, canvasId] = m
+      if (!flutterCanvasExists(workspaceId, canvasId)) return error(res, 404, 'Flutter canvas not found')
+      json(res, 200, readFlutterCanvasLayout(workspaceId, canvasId))
+    },
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/flutter-workspaces\/([^/]+)\/canvases\/([^/]+)\/frames$/,
+    handler: async (req, res, m) => {
+      const [, workspaceId, canvasId] = m
+      if (!flutterCanvasExists(workspaceId, canvasId)) return error(res, 404, 'Flutter canvas not found')
+      const body = (await readBody(req)) as {
+        id?: unknown; name?: unknown; screenId?: unknown
+        x?: unknown; y?: unknown; w?: unknown; h?: unknown
+      }
+      const frameId = asString(body.id)
+      const name = asString(body.name)
+      const screenId = asString(body.screenId)
+      if (!frameId || !validProjectId(frameId) || !name || !screenId || !validProjectId(screenId)) {
+        return error(res, 400, 'id, name, and screenId are required')
+      }
+      const x = asNumber(body.x) ?? 200
+      const y = asNumber(body.y) ?? 200
+      const w = asNumber(body.w) ?? 393
+      const h = asNumber(body.h) ?? 852
+      try {
+        appendFlutterScreen(workspaceId, canvasId, { id: frameId, name, kind: 'flutter', screenId }, { x, y, w, h })
+        json(res, 201, { id: frameId, name, kind: 'flutter', screenId })
+      } catch (cause) {
+        error(res, 409, cause instanceof Error ? cause.message : 'Could not add Flutter frame')
+      }
+    },
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/flutter-workspaces\/([^/]+)\/runner$/,
+    handler: (_req, res, m) => {
+      const [, workspaceId] = m
+      if (!isFlutterWorkspace(workspaceId)) return error(res, 404, 'Flutter workspace not found')
+      json(res, 200, flutterRunners.status(workspaceId))
+    },
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/flutter-workspaces\/([^/]+)\/runner\/start$/,
+    handler: async (_req, res, m) => {
+      const [, workspaceId] = m
+      if (!isFlutterWorkspace(workspaceId)) return error(res, 404, 'Flutter workspace not found')
+      json(res, 202, await flutterRunners.start(workspaceId))
+    },
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/flutter-workspaces\/([^/]+)\/runner\/stop$/,
+    handler: (_req, res, m) => {
+      const [, workspaceId] = m
+      if (!isFlutterWorkspace(workspaceId)) return error(res, 404, 'Flutter workspace not found')
+      flutterRunners.stop(workspaceId)
+      json(res, 200, flutterRunners.status(workspaceId))
+    },
+  },
   {
     method: 'GET',
     pattern: /^\/api\/workspace$/,
@@ -377,7 +541,7 @@ const routes: { method: string; pattern: RegExp; handler: Handler }[] = [
       if (!removed) return error(res, 404, 'Frame not found')
       removeLayoutEntry(id, frameId)
       if (deleteFile) {
-        const resolved = resolveFrameFile(id, removed.file)
+        const resolved = removed.file ? resolveFrameFile(id, removed.file) : null
         if (resolved && fs.existsSync(resolved)) fs.unlinkSync(resolved)
       }
       json(res, 200, { ok: true })

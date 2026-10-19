@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base href="$FLUTTER_BASE_HREF">
+    <meta charset="UTF-8">
+    <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+    <meta name="description" content="Frameground Flutter preview demo.">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frameground Flutter demo</title>
+  </head>
+  <body>
+    <script>
+      // One Canvas frame owns DWDS; sibling previews use the same successful
+      // compile without claiming Flutter's single debug connection.
+      (() => {
+        const params = new URL(window.location.href).searchParams;
+        // Only the Canvas anchor frame connects to DWDS. The rest of a Canvas
+        // runs the same freshly compiled source without claiming Flutter's
+        // single debug connection, then Frameground refreshes them after a
+        // successful reload.
+        if (params.get('fg_no_dwds') === '1') {
+          window.$dwdsInitialized = true;
+          window.$dartMainExecuted = true;
+        }
+        const instanceId = params.get('fg_instance');
+        if (!instanceId) return;
+        try {
+          const key = 'dartAppInstanceId';
+          const prototype = Object.getPrototypeOf(window.sessionStorage);
+          const getItem = prototype.getItem;
+          const setItem = prototype.setItem;
+          Object.defineProperty(prototype, 'getItem', {
+            configurable: true,
+            value(name) { return name === key ? instanceId : getItem.call(this, name); },
+          });
+          Object.defineProperty(prototype, 'setItem', {
+            configurable: true,
+            value(name, value) { if (name !== key) setItem.call(this, name, value); },
+          });
+        } catch (_) {
+          // A restrictive embedding still leaves the single anchor usable.
+        }
+      })();
+    </script>
+    <script src="flutter_bootstrap.js" async></script>
+  </body>
+</html>

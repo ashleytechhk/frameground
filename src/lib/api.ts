@@ -20,6 +20,89 @@ export function createProject(name: string): Promise<{ id: string }> {
   return req('/api/projects', { method: 'POST', body: JSON.stringify({ name }) })
 }
 
+export type WorkspaceSummary =
+  | { id: string; kind: 'html' }
+  | {
+      id: string
+      kind: 'flutter'
+      version: 1
+      defaultCanvasId: string
+      canvases: FlutterCanvas[]
+    }
+
+export interface FlutterCanvas {
+  id: string
+  name: string
+}
+
+export interface FlutterWorkspace {
+  id: string
+  kind: 'flutter'
+  version: 1
+  defaultCanvasId: string
+  canvases: FlutterCanvas[]
+}
+
+export type FlutterRunnerState = 'stopped' | 'starting' | 'ready' | 'reloading' | 'restarting' | 'error'
+
+export interface FlutterRunnerStatus {
+  state: FlutterRunnerState
+  url?: string
+  pid?: number
+  message?: string
+  updatedAt: number
+}
+
+export function listWorkspaces(): Promise<{ workspaces: WorkspaceSummary[] }> {
+  return req('/api/workspaces')
+}
+
+export function createFlutterWorkspace(name: string, canvasId = 'onboarding'): Promise<FlutterWorkspace> {
+  return req('/api/flutter-workspaces', {
+    method: 'POST',
+    body: JSON.stringify({ name, canvasId }),
+  })
+}
+
+export function getFlutterWorkspace(workspaceId: string): Promise<FlutterWorkspace> {
+  return req(`/api/flutter-workspaces/${workspaceId}`)
+}
+
+export function createFlutterCanvas(workspaceId: string, id: string, name = id): Promise<FlutterCanvas> {
+  return req(`/api/flutter-workspaces/${workspaceId}/canvases`, {
+    method: 'POST',
+    body: JSON.stringify({ id, name }),
+  })
+}
+
+export function getFlutterCanvasManifest(workspaceId: string, canvasId: string): Promise<Manifest> {
+  return req(`/api/flutter-workspaces/${workspaceId}/canvases/${canvasId}/manifest`)
+}
+
+export function getFlutterCanvasLayout(workspaceId: string, canvasId: string): Promise<Layout> {
+  return req(`/api/flutter-workspaces/${workspaceId}/canvases/${canvasId}/layout`)
+}
+
+export function patchFlutterCanvasLayout(
+  workspaceId: string,
+  canvasId: string,
+  frameId: string,
+  patch: Partial<LayoutEntry>,
+): Promise<LayoutEntry> {
+  return req(`/api/flutter-workspaces/${workspaceId}/canvases/${canvasId}/layout/${frameId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+export function getFlutterRunnerStatus(workspaceId: string): Promise<FlutterRunnerStatus> {
+  return req(`/api/flutter-workspaces/${workspaceId}/runner`)
+}
+
+export function startFlutterRunner(workspaceId: string): Promise<FlutterRunnerStatus> {
+  return req(`/api/flutter-workspaces/${workspaceId}/runner/start`, { method: 'POST' })
+}
+
 export function getManifest(projectId: string): Promise<Manifest> {
   return req(`/api/projects/${projectId}/manifest`)
 }

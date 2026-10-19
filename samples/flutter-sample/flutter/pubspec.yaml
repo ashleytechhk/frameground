@@ -1,0 +1,18 @@
+name: frameground_flutter_sample
+description: Shared-source Flutter preview sample for Frameground.
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.2.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

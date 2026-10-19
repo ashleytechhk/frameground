@@ -9,6 +9,7 @@ import { shouldReloadFrameForFile } from '../lib/frameReload'
 type SetNodes = React.Dispatch<React.SetStateAction<Node[]>>
 
 function buildNode(projectId: string, entry: FrameEntry, layout = DEFAULT_LAYOUT, version = 0): Node {
+  const file = entry.file ?? ''
   return {
     id: entry.id,
     type: HTML_FRAME_TYPE,
@@ -16,8 +17,8 @@ function buildNode(projectId: string, entry: FrameEntry, layout = DEFAULT_LAYOUT
     style: { width: layout.w, height: layout.h + 32 },
     data: {
       name: entry.name,
-      file: entry.file,
-      url: `/frames/${projectId}/${entry.file}?v=${version}`,
+      file,
+      url: `/frames/${projectId}/${file}?v=${version}`,
       editMode: false,
     },
   }
@@ -36,16 +37,17 @@ export function useFrameSync(projectId: string, setNodes: SetNodes) {
         const l = layout[entry.id] ?? DEFAULT_LAYOUT
         if (existing) {
           const previousData = existing.data as { file?: string; url?: string }
-          const fileChanged = previousData.file !== entry.file
+          const file = entry.file ?? ''
+          const fileChanged = previousData.file !== file
           return {
             ...existing,
             data: {
               ...existing.data,
               name: entry.name,
-              file: entry.file,
+              file,
               // A renamed file needs a new iframe source. Keep the same node so
               // React Flow retains its position, size, pan, and zoom state.
-              url: fileChanged ? `/frames/${projectId}/${entry.file}?v=${Date.now()}` : previousData.url,
+              url: fileChanged ? `/frames/${projectId}/${file}?v=${Date.now()}` : previousData.url,
             },
           }
         }

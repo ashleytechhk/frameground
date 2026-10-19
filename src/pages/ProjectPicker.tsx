@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { createProject, listProjects } from '../lib/api'
+import { createFlutterWorkspace, createProject, listWorkspaces, type WorkspaceSummary } from '../lib/api'
 
 export function ProjectPicker() {
-  const [projects, setProjects] = useState<string[]>([])
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([])
   const [name, setName] = useState('')
+  const [kind, setKind] = useState<'html' | 'flutter'>('html')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
 
   useEffect(() => {
-    listProjects().then(r => setProjects(r.projects)).catch(e => setError(String(e)))
+    listWorkspaces().then(r => setWorkspaces(r.workspaces)).catch(e => setError(String(e)))
   }, [])
 
   async function handleCreate(e: React.FormEvent) {
@@ -19,8 +20,13 @@ export function ProjectPicker() {
     setCreating(true)
     setError(null)
     try {
-      const { id } = await createProject(name.trim())
-      navigate(`/p/${id}`)
+      if (kind === 'flutter') {
+        const workspace = await createFlutterWorkspace(name.trim())
+        navigate(`/p/${workspace.id}/${workspace.defaultCanvasId}`)
+      } else {
+        const { id } = await createProject(name.trim())
+        navigate(`/p/${id}`)
+      }
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -34,14 +40,14 @@ export function ProjectPicker() {
 
       <section style={{ marginBottom: 32 }}>
         <h2 style={{ fontSize: 16, color: '#666', marginBottom: 12 }}>Projects</h2>
-        {projects.length === 0 ? (
+        {workspaces.length === 0 ? (
           <p style={{ color: '#999' }}>No projects yet. Create one below.</p>
         ) : (
           <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {projects.map(p => (
-              <li key={p} style={{ borderBottom: '1px solid #eee' }}>
+            {workspaces.map(workspace => (
+              <li key={workspace.id} style={{ borderBottom: '1px solid #eee' }}>
                 <Link
-                  to={`/p/${p}`}
+                  to={workspace.kind === 'flutter' ? `/p/${workspace.id}/${workspace.defaultCanvasId}` : `/p/${workspace.id}`}
                   style={{
                     display: 'block',
                     padding: '12px 0',
@@ -50,7 +56,10 @@ export function ProjectPicker() {
                     fontWeight: 500,
                   }}
                 >
-                  {p}
+                  {workspace.id}
+                  {workspace.kind === 'flutter' && (
+                    <span style={{ marginLeft: 8, color: '#1685b2', fontSize: 12, fontWeight: 700 }}>Flutter</span>
+                  )}
                 </Link>
               </li>
             ))}
@@ -60,7 +69,7 @@ export function ProjectPicker() {
 
       <section>
         <h2 style={{ fontSize: 16, color: '#666', marginBottom: 12 }}>New project</h2>
-        <form onSubmit={handleCreate} style={{ display: 'flex', gap: 8 }}>
+        <form onSubmit={handleCreate} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <input
             value={name}
             onChange={e => setName(e.target.value)}
@@ -75,6 +84,15 @@ export function ProjectPicker() {
               fontSize: 14,
             }}
           />
+          <select
+            value={kind}
+            onChange={e => setKind(e.target.value as 'html' | 'flutter')}
+            aria-label="Project type"
+            style={{ padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, background: '#fff', fontSize: 14 }}
+          >
+            <option value="html">HTML</option>
+            <option value="flutter">Flutter</option>
+          </select>
           <button
             type="submit"
             disabled={creating || !name.trim()}
@@ -88,7 +106,7 @@ export function ProjectPicker() {
               fontSize: 14,
             }}
           >
-            Create
+            Create {kind === 'flutter' ? 'workspace' : 'project'}
           </button>
         </form>
         {error && <p style={{ color: '#c33', marginTop: 8, fontSize: 13 }}>{error}</p>}

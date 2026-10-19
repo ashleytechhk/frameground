@@ -6,11 +6,14 @@ import {
   validProjectId,
   projectsRoot,
   ensureRoot,
+  bootstrapBundledSamples,
+  isSymlinkProjectRegistry,
   projectDir,
   projectExists,
   listProjects,
   createProject,
   resolveFrameFile,
+  resolveProjectPath,
 } from './projects.ts'
 
 let tmp: string
@@ -60,6 +63,70 @@ describe('projectsRoot / ensureRoot', () => {
     expect(fs.existsSync(tmp)).toBe(false)
     ensureRoot()
     expect(fs.existsSync(tmp)).toBe(true)
+  })
+
+  test('does not bootstrap bundled samples into a caller-provided root', () => {
+    ensureRoot()
+    expect(fs.existsSync(path.join(tmp, '.frameground-registry.json'))).toBe(false)
+    expect(fs.existsSync(path.join(tmp, 'flutter-sample'))).toBe(false)
+  })
+})
+
+describe('bundled sample bootstrap', () => {
+  function makeSampleRoot(): { registry: string; samples: string } {
+    const registry = path.join(tmp, 'registry')
+    const samples = path.join(tmp, 'samples')
+    fs.mkdirSync(path.join(samples, 'flutter-sample'), { recursive: true })
+    fs.mkdirSync(path.join(samples, 'html-sample'), { recursive: true })
+    return { registry, samples }
+  }
+
+  test('creates a link-only marker and portable relative symlinks in an empty registry', () => {
+    const { registry, samples } = makeSampleRoot()
+
+    bootstrapBundledSamples(registry, samples)
+
+    expect(isSymlinkProjectRegistry(registry)).toBe(true)
+    for (const id of ['flutter-sample', 'html-sample']) {
+      const entry = path.join(registry, id)
+      expect(fs.lstatSync(entry).isSymbolicLink()).toBe(true)
+      expect(fs.readlinkSync(entry)).toBe(path.relative(registry, path.join(samples, id)))
+      expect(fs.statSync(entry).isDirectory()).toBe(true)
+    }
+
+    process.env.PROJECTS_ROOT = registry
+    expect(listProjects()).toEqual(['flutter-sample', 'html-sample'])
+  })
+
+  test('waits for a missing sample and registers it on a later bootstrap', () => {
+    const registry = path.join(tmp, 'registry')
+    const samples = path.join(tmp, 'samples')
+    fs.mkdirSync(path.join(samples, 'flutter-sample'), { recursive: true })
+
+    bootstrapBundledSamples(registry, samples)
+    expect(fs.existsSync(path.join(registry, 'flutter-sample'))).toBe(true)
+    expect(fs.existsSync(path.join(registry, 'html-sample'))).toBe(false)
+
+    fs.mkdirSync(path.join(samples, 'html-sample'))
+    bootstrapBundledSamples(registry, samples)
+    expect(fs.lstatSync(path.join(registry, 'html-sample')).isSymbolicLink()).toBe(true)
+  })
+
+  test('does not overwrite a user-owned registry entry', () => {
+    const { registry, samples } = makeSampleRoot()
+    fs.mkdirSync(registry, { recursive: true })
+    fs.writeFileSync(path.join(registry, '.frameground-registry.json'), JSON.stringify({ version: 1, mode: 'symlink' }))
+    const external = path.join(tmp, 'external-flutter')
+    fs.mkdirSync(external)
+    const existing = path.join(registry, 'flutter-sample')
+    fs.symlinkSync(external, existing, 'dir')
+    const htmlFile = path.join(registry, 'html-sample')
+    fs.writeFileSync(htmlFile, 'leave this alone')
+
+    bootstrapBundledSamples(registry, samples)
+
+    expect(fs.readlinkSync(existing)).toBe(external)
+    expect(fs.readFileSync(htmlFile, 'utf-8')).toBe('leave this alone')
   })
 })
 
@@ -142,6 +209,57 @@ describe('projectExists / listProjects', () => {
     fs.writeFileSync(path.join(tmp, 'stray-file.txt'), 'x')
     fs.mkdirSync(path.join(tmp, '.hidden'))
     expect(listProjects()).toEqual(['apple', 'mango', 'zebra'])
+  })
+})
+
+describe('managed symlink registry', () => {
+  function enableRegistry(): void {
+    fs.writeFileSync(path.join(tmp, '.frameground-registry.json'), JSON.stringify({ version: 1, mode: 'symlink' }))
+  }
+
+  test('lists only a valid direct directory symlink', () => {
+    enableRegistry()
+    const source = path.join(tmp, 'source-workspace')
+    fs.mkdirSync(source)
+    fs.symlinkSync(source, path.join(tmp, 'registered-demo'), 'dir')
+
+    expect(isSymlinkProjectRegistry()).toBe(true)
+    expect(listProjects()).toEqual(['registered-demo'])
+    expect(projectExists('registered-demo')).toBe(true)
+    expect(projectDir('registered-demo')).toBe(fs.realpathSync(source))
+  })
+
+  test('excludes regular directories, broken links, and links to files', () => {
+    enableRegistry()
+    fs.mkdirSync(path.join(tmp, 'regular-project'))
+    fs.symlinkSync(path.join(tmp, 'missing-project'), path.join(tmp, 'broken-project'), 'dir')
+    const file = path.join(tmp, 'not-a-directory')
+    fs.writeFileSync(file, 'not a project')
+    fs.symlinkSync(file, path.join(tmp, 'file-project'))
+
+    expect(listProjects()).toEqual([])
+    expect(projectExists('regular-project')).toBe(false)
+    expect(projectExists('broken-project')).toBe(false)
+    expect(projectExists('file-project')).toBe(false)
+  })
+
+  test('rejects nested symlink escapes for frame reads and writes', () => {
+    enableRegistry()
+    const source = path.join(tmp, 'source-workspace')
+    const outside = path.join(tmp, 'outside')
+    fs.mkdirSync(source)
+    fs.mkdirSync(outside)
+    fs.symlinkSync(source, path.join(tmp, 'registered-demo'), 'dir')
+    fs.symlinkSync(outside, path.join(source, 'escape'), 'dir')
+
+    expect(resolveFrameFile('registered-demo', 'safe/new.html')).toBe(path.join(fs.realpathSync(source), 'safe', 'new.html'))
+    expect(resolveFrameFile('registered-demo', 'escape/new.html')).toBeNull()
+    expect(resolveProjectPath('registered-demo', 'escape/new.txt')).toBeNull()
+  })
+
+  test('does not create an unregistered regular project', () => {
+    enableRegistry()
+    expect(() => createProject('new-project')).toThrow(/registered directory symlinks/)
   })
 })
 

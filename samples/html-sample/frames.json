@@ -1,0 +1,9 @@
+{
+  "frames": [
+    { "id": "today", "name": "Today", "file": "frames/today.html" },
+    { "id": "plant-detail", "name": "Plant detail", "file": "frames/plant-detail.html" },
+    { "id": "care-plan", "name": "Care plan", "file": "frames/care-plan.html" },
+    { "id": "journal", "name": "Journal", "file": "frames/journal.html" },
+    { "id": "collection", "name": "Collection", "file": "frames/collection.html" }
+  ]
+}

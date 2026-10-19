@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "kind": "flutter-canvas",
+  "workspaceId": "flutter-sample",
+  "preview": {
+    "type": "flutter",
+    "workspace": "../../workspace.json",
+    "queryParameter": "fg_screen"
+  },
+  "frames": [
+    {
+      "id": "welcome",
+      "name": "Welcome",
+      "type": "flutter",
+      "screenId": "welcome",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "id": "permissions",
+      "name": "Permissions",
+      "type": "flutter",
+      "screenId": "permissions",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "id": "plan",
+      "name": "Plan",
+      "type": "flutter",
+      "screenId": "plan",
+      "width": 390,
+      "height": 844
+    }
+  ]
+}

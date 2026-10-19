@@ -25,3 +25,7 @@ dist-ssr
 
 /projects
 
+# Generated while exercising the bundled Flutter sample; source and lockfile
+# remain tracked so a clean checkout can run it after `flutter pub get`.
+/samples/flutter-sample/flutter/.dart_tool/
+/samples/flutter-sample/flutter/build/

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "id": "flutter-sample",
+  "kind": "flutter-workspace",
+  "name": "Frameground Flutter sample workspace",
+  "flutter": {
+    "root": "flutter",
+    "entrypoint": "lib/main.dart",
+    "previewCatalog": "lib/preview_catalog.dart",
+    "queryParameter": "fg_screen",
+    "runner": {
+      "device": "web-server",
+      "host": "127.0.0.1",
+      "defaultPort": 7357
+    }
+  },
+  "canvases": [
+    {
+      "id": "onboarding",
+      "name": "Onboarding",
+      "path": "canvases/onboarding"
+    },
+    {
+      "id": "main-flow",
+      "name": "Main flow",
+      "path": "canvases/main-flow"
+    }
+  ]
+}

@@ -2,6 +2,13 @@ import path from 'path'
 import chokidar, { type FSWatcher } from 'chokidar'
 import type { ServerResponse } from 'http'
 import { projectDir, projectExists } from './projects.ts'
+import {
+  classifyFlutterChange,
+  flutterRunnerEvents,
+  flutterRunners,
+  isFlutterWorkspace,
+  type FlutterRunnerStatus,
+} from './flutter.ts'
 
 type Channel = {
   watcher: FSWatcher
@@ -10,6 +17,13 @@ type Channel = {
 
 const channels = new Map<string, Channel>()
 const DEBOUNCE_MS = 80
+
+type FlutterWatcherGlobals = typeof globalThis & {
+  __framegroundFlutterStatusBridge?: (workspaceId: string, status: FlutterRunnerStatus) => void
+  __framegroundFlutterStatusListenerInstalled?: boolean
+}
+
+const watcherGlobals = globalThis as FlutterWatcherGlobals
 
 /** Convert an absolute chokidar path into the URL/manifest-style project path. */
 export function projectRelativeFile(projectPath: string, changedPath: string): string {
@@ -27,6 +41,19 @@ function broadcast(projectId: string, event: string, data: unknown): void {
       ch.subs.delete(res)
     }
   }
+}
+
+// The runner registry deliberately has no HTTP/SSE knowledge. Keep a single
+// global listener across Vite server-module HMR, while pointing it at the
+// latest module's channel map.
+watcherGlobals.__framegroundFlutterStatusBridge = (workspaceId, status) => {
+  broadcast(workspaceId, 'flutter-runner', status)
+}
+if (!watcherGlobals.__framegroundFlutterStatusListenerInstalled) {
+  flutterRunnerEvents.on('status', (workspaceId: string, status: FlutterRunnerStatus) => {
+    watcherGlobals.__framegroundFlutterStatusBridge?.(workspaceId, status)
+  })
+  watcherGlobals.__framegroundFlutterStatusListenerInstalled = true
 }
 
 function debounce<T extends (...a: never[]) => void>(fn: T, ms: number): T {
@@ -48,6 +75,10 @@ function ensureChannel(projectId: string): Channel {
       const rel = path.relative(dir, p)
       if (!rel || rel === '.') return false
       if (rel === 'node_modules' || rel.startsWith('node_modules' + path.sep)) return true
+      if (isFlutterWorkspace(projectId) && (
+        rel === 'flutter/build' || rel.startsWith('flutter/build' + path.sep) ||
+        rel === 'flutter/.dart_tool' || rel.startsWith('flutter/.dart_tool' + path.sep)
+      )) return true
       return false
     },
   })
@@ -73,6 +104,21 @@ function ensureChannel(projectId: string): Channel {
 
   const onChange = (p: string) => {
     const rel = projectRelativeFile(dir, p)
+    if (isFlutterWorkspace(projectId)) {
+      const action = classifyFlutterChange(rel)
+      if (action !== 'ignore') flutterRunners.requestUpdate(projectId, action)
+
+      const canvasChange = rel.match(/^canvases\/([^/]+)\/(frames\.json|\.opendesign\/layout\.json|canvas\.json)$/)
+      if (canvasChange) {
+        broadcast(projectId, 'flutter-canvas-changed', {
+          canvasId: canvasChange[1],
+          file: rel,
+        })
+      } else if (rel === 'workspace.json') {
+        broadcast(projectId, 'flutter-workspace-changed', {})
+      }
+      return
+    }
     if (rel === 'frames.json') emitManifest()
     else if (rel === layoutFile) emitLayout()
     else if (rel === settingsFile) emitSettings()
